@@ -15,16 +15,17 @@ def client():
 
     cs.connect(server_binding)
 
-    # Input string to send to the server
-    message = input("[C]: Enter a string to send to the server: ")
-    print(f"[C]: Sending to server: {message}")
+    # Open the input file and send each line to the server
+    with open("in-proj.txt", "r") as input_file:
+        for line in input_file:
+            message = line.strip()  # Remove leading/trailing whitespace
+            if message:  # Send only non-empty lines
+                print(f"[C]: Sending to server: {message}")
+                cs.send(message.encode('utf-8'))
 
-    # Send the string to the server
-    cs.send(message.encode('utf-8'))
-
-    # Receive transformed string from the server
-    data_from_server = cs.recv(1024).decode('utf-8')
-    print(f"[C]: Received from server: {data_from_server}")
+                # Receive transformed response from server
+                data_from_server = cs.recv(200).decode('utf-8')
+                print(f"[C]: Received from server: {data_from_server}")
 
     # Close the client socket
     cs.close()
