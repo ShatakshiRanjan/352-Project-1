@@ -1,44 +1,112 @@
+import re
 import socket
 import sys
 
-def load_database(filename):
-    db = {}
-    with open(filename, 'r') as file:
-        lines = file.readlines()
-        ts1_host = lines[0].strip().split()[1]
-        ts2_host = lines[1].strip().split()[1]
-        for line in lines[2:]:
-            parts = line.strip().split()
-            db[parts[0].lower()] = parts[1]
-    return db, ts1_host, ts2_host
+NO_IP = "0.0.0.0"
 
-def start_server(port, database, ts1_host, ts2_host):
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('', port))
-    server_socket.listen(5)
-    print(f"Root DNS server listening on port {port}...")
+#-----code to lookup the ip address via the Domain name------
+def lookup_ip(domain_name):
+    print("searching for " + domain_name)
+    #search for the exact name
+    for x in range(len(dns_names)):
+        if(dns_names[x] == domain_name):
+            return values[x], "aa"
+    return NO_IP, "nx"
 
-    while True:
-        client_socket, addr = server_socket.accept()
-        data = client_socket.recv(1024).decode().strip()
-        if not data:
-            continue
-        parts = data.split()
-        domain, identifier, flag = parts[1], parts[2], parts[3]
+#----------write the response string---------------------    
 
-        if domain in database:
-            response = f"1 {domain} {database[domain]} {identifier} aa"
-        elif domain.endswith(".com"):
-            response = f"1 {domain} {ts1_host} {identifier} ns"
-        elif domain.endswith(".edu"):
-            response = f"1 {domain} {ts2_host} {identifier} ns"
-        else:
-            response = f"1 {domain} 0.0.0.0 {identifier} nx"
+def write_response(domain_name, result, flag, req_id):
+    return "1 " + domain_name + " " + result + " " + str(req_id) + " " + flag
 
-        client_socket.send(response.encode())
-        client_socket.close()
+#----------create the response ------------------------
+def get_response(request):
+    result = ""
+    req_parts = request.split(" ")
+    if(len(req_parts) != 4):
+        return "ERROR: Invalid Request, DNS lookup must be of format '0 <DOMAIN_NAME> <REQUEST_ID> <FLAG>'"
+    if(req_parts[0] != "0"):
+        return "ERROR: Invalid Request, DNS lookup must start with 0"
+    domain_name = req_parts[1]
+    req_id = 0
+    try:
+        req_id = int(req_parts[2])
+    except ValueError:
+        return "ERROR: Invalid Request, DNS lookup request ID must be numeric"
+    flag =  req_parts[3]   
+    if( flag != "it" and flag != "rd"):
+        return "ERROR: Invalid Request, DNS lookup flags must be either 'it' or 'rd'"
+
+    result, flag = lookup_ip(domain_name)
+    return write_response(domain_name, result, flag, req_id)
+
+#----------run the server ------------------------
+def server(server_port):
+    try:
+        serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        print("[S]: Server socket created")
+    except socket.error as err:
+        print(f'Socket open error: {err}\n')
+        exit()
+
+    server_binding = ('', server_port)
+    serverSocket.bind(server_binding)
+    serverSocket.listen(5)
+
+    print("[S]: Server is waiting for a connection...")
+
+    with open("ts1responses.txt", "w") as output_file:
+        while True:
+            connectionSocket, addr = serverSocket.accept()
+            print(f"[S]: Client is connected at {addr}")
+            data = connectionSocket.recv(200).decode('utf-8')
+            if not data:
+                print("No Data received")  
+            else:
+                modifiedData = get_response(data.strip())
+                print(f"[S]: Received: {data} | Modified: {modifiedData}")
+                output_file.write(modifiedData + '\n')
+                output_file.flush()
+                connectionSocket.sendall(modifiedData.encode('utf-8'))
+            connectionSocket.close()
+    serverSocket.close()
+
+#-------code to read from space separted file--------------
+def populate_list_from_file(file_name):
+    dns_names, values = [], []
+    
+    try:
+        with open(file_name, 'r', encoding='utf-8') as file:
+            for line in file:
+                parts = line.split()
+                if len(parts) == 2: 
+                    dns_names.append(parts[0])
+                    values.append(parts[1])
+                else:
+                    print(f"Error: Invalid line: {line.strip()}")
+        
+        return dns_names, values
+    except FileNotFoundError:
+        print(f"Error: The file: '{file_name}' is not found.")
+        dns_names, values
+    except Exception as e:
+        print(f"Error: Unable to read database file:{file_name} {e}")
+        dns_names, values
+#----------------------main_program --------------------------
+server_port = 0
+if len(sys.argv) != 2:
+    print("Error: Missing Argument <port>")
+    sys.exit(1)
+else:
+    try:
+       server_port = int(sys.argv[1])
+    except Exception:
+        print(f"Error: Invalid port:{sys.argv[1]}")
+        sys.exit(1) 
+
+file_name = "ts1database.txt"
+dns_names, values = populate_list_from_file(file_name)
+
 
 if __name__ == "__main__":
-    port = int(sys.argv[1])
-    database, ts1_host, ts2_host = load_database("rsdatabase.txt")
-    start_server(port, database, ts1_host, ts2_host)
+    server(server_port)
