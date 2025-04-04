@@ -2,6 +2,7 @@ import socket
 import signal
 import sys
 import random
+from urllib.parse import parse_qs
 
 # Read a command line argument for the port where the server
 # must run.
@@ -61,7 +62,6 @@ def sigint_handler(sig, frame):
 # Register the signal handler
 signal.signal(signal.SIGINT, sigint_handler)
 
-
 # TODO: put your application logic here!
 # Read login credentials for all the users
 # Read secret data of all the users
@@ -84,7 +84,6 @@ with open('secrets.txt') as f:
 print("Loaded credentials:", user_passwords)
 print("Loaded secrets:", user_secrets)
 
-
 ### Loop to accept incoming HTTP connections and respond.
 while True:
     client, addr = sock.accept()
@@ -99,6 +98,15 @@ while True:
 
     # TODO: Put your application logic here!
     # Parse headers and body and perform various actions
+    # Parse the form data
+    form_data = parse_qs(body)
+    username = form_data.get("username", [None])[0]
+    password = form_data.get("password", [None])[0]
+    action = form_data.get("action", [None])[0]
+
+    print("Parsed username:", username)
+    print("Parsed password:", password)
+    print("Parsed action:", action)
 
     # OPTIONAL TODO:
     # Set up the port/hostname for the form's submit URL.
@@ -113,20 +121,33 @@ while True:
     # socket.gethostname().
     submit_hostport = "%s:%d" % (hostname, port)
 
-    # You need to set the variables:
-    # (1) `html_content_to_send` => add the HTML content you'd
-    # like to send to the client.
-    # Right now, we just send the default login page.
+    # Default values
     html_content_to_send = login_page % submit_hostport
-    # But other possibilities exist, including
-    # html_content_to_send = (success_page % submit_hostport) + <secret>
-    # html_content_to_send = bad_creds_page % submit_hostport
-    # html_content_to_send = logout_page % submit_hostport
-    
+    headers_to_send = ''
+
+    # Cookie/session storage - initialize only once outside the loop
+    if 'active_tokens' not in globals():
+        active_tokens = {}
+
+    # Case A: Successful username/password login
+    if username and password and username in user_passwords and user_passwords[username] == password:
+        secret = user_secrets.get(username, "No secret found.")
+        html_content_to_send = (success_page % submit_hostport) + secret
+
+        # Generate cookie and store it
+        rand_val = random.getrandbits(64)
+        headers_to_send = f"Set-Cookie: token={rand_val}\r\n"
+        active_tokens[rand_val] = username
+
+    # Case B: Invalid login attempt
+    elif (username or password):  # One or both are incorrect or missing
+        html_content_to_send = bad_creds_page % submit_hostport
+
+    # (Case: default login page already handled above)
+
     # (2) `headers_to_send` => add any additional headers
     # you'd like to send the client?
     # Right now, we don't send any extra headers.
-    headers_to_send = ''
 
     # Construct and send the final response
     response  = 'HTTP/1.1 200 OK\r\n'
@@ -136,7 +157,7 @@ while True:
     print_value('response', response)    
     client.send(response.encode())
     client.close()
-    
+
     print("Served one request/connection!")
     print()
 
